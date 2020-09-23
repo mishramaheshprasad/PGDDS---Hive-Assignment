@@ -1,0 +1,547 @@
+ADD JAR /opt/cloudera/parcels/CDH/lib/hive/lib/hive-hcatalog-core-1.1.0-cdh5.11.2.jar;
+
+SET hive.exec.max.dynamic.partitions=100000;
+SET hive.exec.max.dynamic.partitions.pernode=100000;
+
+-- 2.creating workspace  #######################################################
+
+-- drop database hive_assignment;
+Create database if not exists  hive_assignment;
+use  hive_assignment;
+
+drop table if exists nyc_taxi_details;
+
+create external table if not exists nyc_taxi_details(
+ VendorID int,
+ tpep_pickup_datetime timestamp,
+ tpep_dropoff_datetime timestamp,
+ passenger_count int,
+ trip_distance double,
+ RateCodeID int,
+ Store_and_fwd_flag string,
+ PULocationID int,
+ DOLocationID int,
+ payment_type string,
+ fare_amount double,
+ extra double,
+ mta_tax double,
+ tip_amount double,
+ tolls_amount double,
+ improvement_surcharge double,
+ total_amount double
+) row format delimited fields terminated by ','
+location '/common_folder/nyc_taxi_data/'
+tblproperties("skip.header.line.count" = "1");
+
+select * from nyc_taxi_details;
+select count(*) from nyc_taxi_details;
+
+--Result There are 117569 records are present in the file
+
+--%%%%%%%%%%%%%%%% 1. Basic Data Quality Checks :%%%%%%%%%%%%%%%%%%%%%%%%%%%
+--------------------------------------------------------------------------
+
+--#####################--1.vendorid--########################
+
+---Checking Distinct Vendorid present in our dataset
+
+select distinct vendorid from nyc_taxi_details;
+---There are no issues as only 2 dictinct vendorid 1 and 2 present
+
+---Checking no of record present in for each vendorid...
+select vendorid,count(*) from nyc_taxi_details
+group by vendorid;
+
+--Result 
+--Vendorid   count
+--    1      527386
+--    2      647183
+
+
+--##########################--2.tpep_dropoff_datetime and tpep_pickup_datetime--#################
+
+--Checking if there is any records where the dropofdatetime is less than pickupdatetime
+
+select count(*) from nyc_taxi_details where tpep_dropoff_datetime<tpep_pickup_datetime;
+
+--There are 73 records where the dropofdatetime is less than pickupdatetime
+
+---Checking the rage of tpep_dropoff_datetime and tpep_pickup_datetime
+
+select max(tpep_dropoff_datetime) as max_dropoff,min(tpep_dropoff_datetime) as min_dropoff,
+max(tpep_pickup_datetime) as max_pickup,min(tpep_pickup_datetime) as min_pickup from nyc_taxi_details;
+
+---Result max_dropoff	min_dropoff	max_pickup	min_pickup
+-- 	max_dropoff	                   min_dropoff	            max_pickup	           min_pickup
+--	2019-04-24 19:21:00.0	   2003-01-01 01:28:00.0	2018-01-01 00:04:00.0	2003-01-01 00:58:00.0
+
+select * from nyc_taxi_details order by tpep_dropoff_datetime desc;
+
+-- There is one record with pickup datetime at 2017-11 nd fropoff datetime 2019-4
+
+
+-- b. Checking if records having pickup month and year other than 2017 & (Nov, Dec) 
+select count(*) as number_of_record from nyc_taxi_details 
+where substr(tpep_pickup_datetime, 1, 7) not in('2017-11','2017-12');
+----14 records found
+
+-- b. Checking if records having dropoff month and year other than 2017 & (Nov, Dec) 
+select count(*) as number_of_record from nyc_taxi_details 
+where substr(tpep_dropoff_datetime, 1, 7) not in('2017-11','2017-12');
+
+---- 117 records present
+
+-- Checking tpep_pickup_datetime or tpep_dropoff_datetime  for NULL values
+ 
+-- No such value
+
+--##########################--2.passenger_count--#################
+-- Checking passenger_count for pickup month and year as (Nov, Dec) and 2017 respectively
+
+select max(passenger_count),min(passenger_count) from nyc_taxi_details;
+
+--Result Max passanger count is 9 and min is 0
+
+-- Checking if the the passenger_count has null value for pickup month and year as (Nov, Dec) and 2017 respectively
+select count(*) from nyc_taxi_details 
+where substr(tpep_pickup_datetime, 1, 7) in('2017-11','2017-12') and passenger_count is null;
+-- No Null Value
+
+---Checking no_of_records for each passenger_count
+
+select passenger_count, count(*) from  nyc_taxi_details  group by passenger_count order by passenger_count;
+
+--	_c1
+ 	passenger_count	 count
+--	  0	             6824
+--	  1	             827499
+--	  2              176872
+--	  3           	 50693
+--	  4	             24951
+--	  5	             54568
+--	  6	             33146
+--	  7	             12
+--	  8	             3
+--	  9	             1
+
+--##########################--2.trip_distance--#################
+
+-- Checking if the trip distance has negative value 
+select count(*) from nyc_taxi_details
+where substr(tpep_pickup_datetime, 1, 7) in('2017-11','2017-12') and  trip_distance < 0;
+-- 0 total rows
+
+-- Checking if the trip distance has NULL value 
+select count(*) from nyc_taxi_details
+where substr(tpep_pickup_datetime, 1, 7) in('2017-11','2017-12') and trip_distance is null;
+-- No NULL Value
+
+--Checking the max and min trip distance for all the records.
+select max(trip_distance),min(trip_distance) from nyc_taxi_details;
+
+--Max Trip distance=126.41
+--min trip distance=0
+
+--##########################--2.RateCodeID--#################
+-- Checking RateCodeID for pickup month and year as (Nov, Dec) and 2017 respectively
+select RateCodeID, count(*) from nyc_taxi_details 
+where substr(tpep_pickup_datetime, 1, 7) in('2017-11','2017-12') group by RateCodeID;
+-- We can see that 9 records with ratecodeid 99 also exists and it is not valid one
+
+--Checking the incorrect ratecodeid 99 distribution
+select vendorid , count(*) 
+from  nyc_taxi_details
+where ratecodeid=99
+group by vendorid;
+
+-- Most of incoorect ratecodeid is in vendorid 1 whereas vendorid 1
+---contains one incorrect ratecodeid
+
+--##########################--2.store_and_fwd_flag--#################
+-- Checking store_and_fwd_flag for pickup month and year as (Nov, Dec) and 2017 respectively
+select store_and_fwd_flag, count(*) from nyc_taxi_details 
+where substr(tpep_pickup_datetime, 1, 7) in('2017-11','2017-12') group by store_and_fwd_flag;
+-- No issue in this column
+
+--##########################--2.PULocationID and DOLocationID--#################
+
+-- Checking PULocationID or DOLocationID for NULL values for pickup month and year as (Nov, Dec) and 2017 respectively
+select count(*) from nyc_taxi_details
+where substr(tpep_pickup_datetime, 1, 7) in('2017-11','2017-12') and PULocationID is null or DOLocationID is null;
+-- No NULL Value
+
+--Checking the data where PULocationID and DOLocationID have same value
+
+select count(*) from nyc_taxi_details where PULocationID=DOLocationID;
+
+--82694 records are there where PuLocationID is same as DOLocationID
+
+--##########################--2.fare_amount--#################
+
+-- Checking if the fare_amount column has negative for pickup month and year as (Nov, Dec) and 2017 respectively
+select count(*) from nyc_taxi_details
+where substr(tpep_pickup_datetime, 1, 7) in('2017-11','2017-12') and fare_amount < 0;
+--558 total rows
+
+-- Checking from which vendor this erroneous rows are coming
+select distinct(vendorid) from nyc_taxi_details
+where substr(tpep_pickup_datetime, 1, 7) in('2017-11','2017-12') and fare_amount <= 0;
+--From Both the Vendor
+
+--Checking the maximum and minimum values for fare amount
+
+select max(fare_amount),min(fare_amount) from nyc_taxi_details;
+
+--Max fare_amount=650
+--Min fare_amount=-200
+
+--##########################--2.extra--#################
+
+-- Checking if the extra column has values other than (0,0.5,1)for pickup month and year as (Nov, Dec) and 2017 respectively
+
+select count(*) from  nyc_taxi_details where extra not in (0,0.5,1);
+
+-- 4856 total rows
+
+-- Checking from which vendor this erroneous rows are coming
+select vendorid,count(*) from nyc_taxi_details
+where substr(tpep_pickup_datetime, 1, 7) in('2017-11','2017-12') and  extra not in (0,0.5,1) group by vendorid;
+--From Both the Vendor
+
+--Checking the maximum and minimum values for extra
+
+select max(extra),min(extra) from nyc_taxi_details;
+
+--Max extra=4.8
+--Min extr=--10.6
+--##########################--2.mta_tax--#################
+
+-- Checking if the mta_tax column has other than 0 or 0.5 value for pickup month and year as (Nov, Dec) and 2017 respectively
+select count(*) from nyc_taxi_details
+where substr(tpep_pickup_datetime, 1, 7) in('2017-11','2017-12') and mta_tax not in (0.5, 0);
+-- 58 total rows
+
+-- Checking from which vendor this erroneous rows are coming
+select distinct(vendorid) from nyc_taxi_details
+where substr(tpep_pickup_datetime, 1, 7) in('2017-11','2017-12') and mta_tax not in (0.5, 0);
+--From Both the Vendor
+
+--Checking the maximum and minimum values for mta_tax
+
+select max(mta_tax),min(mta_tax) from nyc_taxi_details;
+
+--Max extra=11.4
+--Min extr=-0.5
+
+--##########################--2.tip_amount--#################
+
+-- Checking if the tip_amount column has negative value for pickup month and year as (Nov, Dec) and 2017 respectively
+select count(*) from nyc_taxi_details
+where substr(tpep_pickup_datetime, 1, 7) in('2017-11','2017-12') and tip_amount < 0;
+-- 4 total rows
+
+-- Checking from which vendor this erroneous rows are coming
+select vendorid,count(*) from nyc_taxi_details
+where substr(tpep_pickup_datetime, 1, 7) in('2017-11','2017-12') and tip_amount < 0 group by vendorid;
+--From 2nd Vendor i.e. VeriFone Inc.
+
+--Checking the maximum and minimum values for tip_amount
+
+select max(tip_amount),min(tip_amount) from nyc_taxi_details;
+
+--Max extra=450
+--Min extr=--1.16
+
+--##########################--2.tolls_amount--#################
+
+-- Checking if the tolls_amount column has negative value for pickup month and year as (Nov, Dec) and 2017 respectively
+select count(*) from nyc_taxi_details
+where substr(tpep_pickup_datetime, 1, 7) in('2017-11','2017-12') and tolls_amount < 0;
+-- 3 total rows
+
+-- Checking from which vendor this erroneous rows are coming
+select vendorid,count(*) from nyc_taxi_details
+where substr(tpep_pickup_datetime, 1, 7) in('2017-11','2017-12') and tolls_amount < 0 group by vendorid;
+--From 2nd Vendor i.e. VeriFone Inc.
+
+--Checking the maximum and minimum values for tolls_amount
+
+select max(tolls_amount),min(tolls_amount) from nyc_taxi_details;
+
+--Max extra=895.89
+--Min extr=-5.76
+
+--##########################--2.improvement_surcharge--#################
+
+-- Checking if the improvement_surcharge column has value other than 0.30 for pickup month and year as (Nov, Dec) and 2017 respectively
+select count(*) from nyc_taxi_details
+where substr(tpep_pickup_datetime, 1, 7) in('2017-11','2017-12') and improvement_surcharge != 0.30;
+-- 849 total rows
+
+-- Checking from which vendor this erroneous rows are coming
+select vendorid,count(*) from nyc_taxi_details
+where substr(tpep_pickup_datetime, 1, 7) in('2017-11','2017-12') and improvement_surcharge != 0.30 group by vendorid;
+--From both the vendor
+
+--Checking the maximum and minimum values for improvement_surcharge
+
+select max(improvement_surcharge),min(improvement_surcharge) from nyc_taxi_details;
+
+--Max extra=1
+--Min extr=-0.3
+--##########################--2.total_amount--#################
+
+-- Checking if the total_amount column has value other negative or zero value for pickup month and year as (Nov, Dec) and 2017 respectively
+select count(*) from nyc_taxi_details
+where substr(tpep_pickup_datetime, 1, 7) in('2017-11','2017-12') and total_amount < 0;
+-- 681 total rows
+
+-- Checking from which vendor this erroneous rows are coming
+select distinct(vendorid) from nyc_taxi_details
+where substr(tpep_pickup_datetime, 1, 7) in('2017-11','2017-12') and total_amount <= 0;
+--From both the vendor
+
+--Checking the maximum and minimum values for total_amount
+
+select max(total_amount),min(total_amount) from nyc_taxi_details;
+
+--Max extra=928.19
+--Min extr=-200
+
+------------------------------------------
+-- Following Assumption we are making before creating ORC Partitioned Table 
+-- 1. We are assuming that dropofftime should be greater than pickuptime so we will remove such errornus rows
+-- 1. In passenger_count column, we are assuming that 0 passengers can not be there in one trip, so we will remove such rows
+-- 2. In trip_distance column we are assuming that trip distance can not be zero or negative, so will remove such rows
+-- 3. RateCodeID column contains value 99 which is not valid as per data dictionary, we will remove such rows
+---4. In fare_amount column we are assuming that no value should have negative or zero value, we will remove such rows
+---5. In Extra Column, assuming that there should not be any negative value, we will remove such rows
+---6. In mta_tax Column, assuming that there should not be any value other than 0 or 0.5, removing such rows
+---7. In tip_amount Column, assuming that there should not be any negative value, removing such rows
+---8. In tolls_amount Column, assuming that there should not be any negative value, removing such rows
+---9. In improvement_surcharge Column, assuming that there should not be any value other than 0.30, removing such rows
+---10. In total_amount Column, assuming that there should not be any negative value, removing such rows
+
+
+--###########################################################################################
+-- Before answering the below questions, you need to create a clean, ORC partitioned table for analysis.
+-- Remove all the erroneous rows.
+
+
+drop table if exists nyc_taxi_partition_orc;
+
+Create external table if not exists nyc_taxi_partition_orc(
+tpep_pickup_datetime timestamp,
+tpep_dropoff_datetime timestamp,
+passenger_count int,
+trip_distance decimal(10,2),
+RatecodeID int,
+store_and_fwd_flag string,
+PULocationID int,
+DOLocationID int,
+payment_type int,
+fare_amount decimal(10,2),
+extra decimal(10,2),
+mta_tax decimal(10,2),
+tip_amount decimal(10,2),
+tolls_amount decimal(10,2),
+improvement_surcharge decimal(10,2),
+total_amount decimal(10,2)
+)
+partitioned by (Mnth int,VendorID int)
+stored as orc location '/user/ashutoshnayak28_gmail/nyc_taxi_assignment'
+tblproperties ("orc.compress"="SNAPPY");
+
+
+
+-- Posting data
+insert overwrite table nyc_taxi_partition_orc partition(Mnth,VendorID)
+select 
+tpep_pickup_datetime,
+tpep_dropoff_datetime,
+passenger_count,
+trip_distance,
+RatecodeID,
+store_and_fwd_flag,
+PULocationID,
+DOLocationID,
+payment_type,
+fare_amount,
+extra,
+mta_tax,
+tip_amount,
+tolls_amount,
+improvement_surcharge,
+total_amount,
+month(tpep_pickup_datetime) Mnth,
+VendorID
+from  nyc_taxi_details
+where  (tpep_pickup_datetime >='2017-11-1 00:00:00.0' and tpep_pickup_datetime<'2018-01-01 00:00:00.0') and
+( tpep_dropoff_datetime >= '2017-11-1 00:00:00.0' and tpep_dropoff_datetime<'2018-01-02 00:00:00.0') and
+(tpep_dropoff_datetime>tpep_pickup_datetime) and
+(passenger_count >0 ) and
+(trip_distance>0) and 
+(ratecodeid!=99) and
+( fare_amount>0 ) and
+ (extra in (0,0.5,1)) and
+ (mta_tax  in (0,0.5)) and 
+(tip_amount >=0) and
+( tolls_amount >=0) and
+( improvement_surcharge in (0,0.3)) and
+( total_amount>=0 ) ;
+
+
+select count(*) from nyc_taxi_partition_orc
+
+--Result 1153604 rows..
+
+-----###----ANALYSIS 1--###########
+
+-- 1 .Compare the overall average fare per trip for November and December
+
+select round(avg(fare_amount),2) as avg_fareamount, mnth as Month from nyc_taxi_partition_orc 
+group by mnth;
+
+--Result
+-- Month  avg_fareamount
+--  11        12.91	
+--	12        12.7	
+--The average fare amount for the month november is slightly higher than the average fare amount for the month december
+
+
+--2. Checking if the Passengers prefer to travel Solo or with other people
+
+select passenger_count, count(*) as no_of_trips from nyc_taxi_partition_orc 
+group by passenger_count order by no_of_trips desc;
+
+-- 	passenger_count	no_of_trips
+--	1	             817034
+--	2	             174785
+--	5	             54037
+--	3	             50183
+--  6	             32882
+--	4	             24680
+--	7	             3
+-- Above Analysis shows that highest number of people travel solo trip.
+-- Solo - 817034 - Highest
+-- Along with one person - 174785 - 2nd Highest
+
+--3. Identifying the preferred mode of payment in trips 
+
+select payment_type, count(*) as no_of_transactions from nyc_taxi_partition_orc
+group by payment_type order by no_of_transactions desc;
+
+
+
+-- 	payment_type	no_of_transactions
+--  	1	            779153
+--	    2	            368659
+--	    3	            4492
+--	    4	            1300
+
+-- Above Analysis shows that highest number of people opt for credit card transaction
+-- Credit Card (1) - 779153
+-- Cash(2) - 368659
+
+--4. Checking the Average tip paid per trip and comparing with 25th, 50th and 75th percentiles
+
+select round(avg(tip_amount),2) as avg_tip_per_trip,
+percentile_approx(tip_amount, 0.25) as 25th_prcntil_avgamnt,  
+round(percentile_approx(tip_amount, 0.50),2) as 50th_prcntil_avgamnt,
+round(percentile_approx(tip_amount, 0.75),2) as 75th_prcntil_avgamnt
+from nyc_taxi_partition_orc;
+
+-- Result
+--	avg_tip_per_trip	25th_prcntil_avgamnt	50th_prcntil_avgamnt	75th_prcntil_avgamnt
+--	    1.83	            0	                    1.35	                2.45
+-- From the above data of percentile values we can see that the data is rightly skewed.
+-- again the median 1.36 is much lower then the avg 1.83 due to the skewness towards higher values
+-- Hence mean is not representative statistic of centeral tendency here.
+
+-- 5. Explore the ‘Extra’ (charge) variable - what fraction of total trips have an extra charge is levied? 
+select extra,round((count(*)*100/1153604),4) cnt from (
+select case when extra>0 then 1 else 0 end  extra
+from nyc_taxi_partition_orc ) T
+group by extra
+order by cnt desc;
+-- Extra applied    %age records
+--      0	        53.8546
+--      1	        46.1454
+-- out of all the records we found 46.14 records where the extra is charged and we have around 53.85 records 
+--where the extras are not applied
+
+
+-- ################--- 3. Analysis-II---########################
+----------------------------------
+--1. Checking the correlation between the number of passengers and tip paid per trip 
+select corr(passenger_count, tip_amount) as correlation
+from nyc_taxi_partition_orc;
+
+-- Correlation of -0.0052, that means there is no strong correlation between number of passengers and tip paid per trip.
+
+
+--2. Segregating the data into five segments of tip paid and calculating the percentage of share of each bucket
+
+select Tip_range, round((count(*)*100/1153604),4) cnt
+from (select
+case when (tip_amount>=0 and tip_amount<5)   then '[0-4]' 
+     when (tip_amount>=5 and tip_amount<10)  then '[5-9]' 
+     when (tip_amount>=10 and tip_amount<15) then '[10-14]'
+     when (tip_amount>=15 and tip_amount<20) then '[15-19]'
+     when (tip_amount>=20)                   then '>=20' end Tip_range
+     from nyc_taxi_partition_orc) T 
+     group by Tip_range
+     order by cnt desc;
+
+--Result
+
+
+-- 	tip_range	cnt
+--	[0-4]	    92.4036
+--	[5-9]	    5.6382
+--	[10-14]	    1.6829
+--	[15-19]	    0.1872
+--Above analysis shows that 0-4 range is the most prominent range with 92.4% records
+
+-- 3.Which month has a greater average ‘speed’ - November or December? 
+-- Note that the variable ‘speed’ will have to be derived from other metrics.
+-- Hint: You have columns for distance and time.    
+
+select mnth , round(avg(trip_distance/((unix_timestamp(tpep_dropoff_datetime)-unix_timestamp(tpep_pickup_datetime) )/3600) ),2) avg_speed
+from nyc_taxi_partition_orc
+group by mnth
+order by avg_speed desc;
+
+--Result
+
+-- 	mnth	avg_speed
+--	12	    11.07
+--	11	    10.97
+
+--4 Analysing the average speed of the most happening days i.e. Christmas(25th Dec) and New Year(1st Jan) with the overall average speed
+
+-- Overall Average Speed
+
+select
+round(avg(trip_distance/((unix_timestamp(tpep_dropoff_datetime)-unix_timestamp(tpep_pickup_datetime) )/3600)),2) as speed_overall
+from nyc_taxi_partition_orc;
+
+--Result total avg speed is 11.02 miles/hour
+
+-- Average Speed on 31st dec
+select
+round(avg(trip_distance/((unix_timestamp(tpep_dropoff_datetime)-unix_timestamp(tpep_pickup_datetime) )/3600)),2) as speed_new_year
+from nyc_taxi_partition_orc 
+where month(tpep_pickup_datetime) = 12 and day(tpep_pickup_datetime) = 31;
+
+--Result  Average speed for the dec 31st is 13.24 miles/hour
+
+-- Average Speed on 25th dec
+select
+round(avg(trip_distance/((unix_timestamp(tpep_dropoff_datetime)-unix_timestamp(tpep_pickup_datetime) )/3600)),2) as speed_new_year
+from nyc_taxi_partition_orc 
+where month(tpep_pickup_datetime) = 12 and day(tpep_pickup_datetime) = 25;
+
+--Result  Average speed for the dec 25th is 15.27 miles/hour
+--Average speed taken for the dec 25th and 31st is much more than the average speed for other days.
+--The fastest average speed is on the christmas day which is 15.27 miles/hour
